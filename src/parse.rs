@@ -1,8 +1,8 @@
 use quick_xml::Reader;
 use quick_xml::events::Event;
-use std::fs::File;
+use std::fs::{File, read_dir};
 use std::io::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use regex::Regex;
 
 // XML parsing state
@@ -172,6 +172,7 @@ fn scan_pages<F>(xml_path: &String, mut valid_page_callback: F) -> ()
 ///
 /// # Arguments
 /// * `xml_path` - Path to the unprocessed XML database dump
+/// * `articles_to_ignore` - A hashset of article names to ignore when constructing the graph.
 ///
 /// # Returns
 ///  * A HashMap of article name -> article index
@@ -204,7 +205,9 @@ fn scan_pages<F>(xml_path: &String, mut valid_page_callback: F) -> ()
 /// during the parsing process, however this only needs to be done once then the result is saved
 /// so this was a good compromise for my use case.
 ///
-pub fn parse_xml_dump(xml_path: &String) -> (HashMap<String, usize>, Vec<Article>) {
+pub fn parse_xml_dump(
+    xml_path: &String,
+    articles_to_ignore: Option<HashSet<String>>) -> (HashMap<String, usize>, Vec<Article>) {
 
     // Compile regexes once for efficiency
     let link_regex = Regex::new(r"\[\[([^\[\]]+)\]\]").unwrap();
@@ -219,6 +222,14 @@ pub fn parse_xml_dump(xml_path: &String) -> (HashMap<String, usize>, Vec<Article
     let mut articles: Vec<Article> = Vec::with_capacity(NUM_ARTICLES);
 
     let get_valid_pages = | article_name: String, body: String | -> () {
+
+        // First check if this is an article to be ignored
+        if let Some(to_ignore) = &articles_to_ignore {
+            if to_ignore.contains(&article_name) {
+                return;
+            }
+        }
+
         // Redirect pages must start with #redirect followed by
         // the page they are redirecting to. No other text is allowed.
         // Case of redirect doesnt matter but im assuming no one will
@@ -381,7 +392,6 @@ pub fn write_to_tsv(
     article_map: &mut HashMap<String, usize>,
     articles: &mut Vec<Article>) -> () {
 
-    println!("{}, {}",article_map.len(), articles.len());
     assert_eq!(article_map.len(), articles.len());
 
     // Convert hashmap to vec in correct order based on index
@@ -506,4 +516,27 @@ fn resolve_redirects(
         }
     }
     return redirects_map;
+}
+
+/// Parses the ignore directory: a directory full of text files containing a list of
+/// wikipedia article names that should be ignored. One article per line.
+///
+/// # Arguments
+/// * `path` - Path of the directory containing textfiles
+///
+/// # Returns
+/// * A HashSet of article names to be ignored
+///
+pub fn parse_ignore_directory(path: &String) -> HashSet<String> {
+    let files = read_dir(path).unwrap();
+    let mut to_ignore: HashSet<String> = HashSet::new();
+    for filename in files {
+        let file = File::open(filename.unwrap().path()).unwrap();
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let line = line.unwrap();
+            to_ignore.insert(line.capitalize_first_letter());
+        }
+    }
+    return to_ignore;
 }

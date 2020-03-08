@@ -29,6 +29,13 @@ fn main() {
                 .default_value("_processed_wikipedia_dump.tsv")
                 .help("Output intermediate file")
             )
+            .arg(Arg::with_name("ignore")
+                .short("n")
+                .long("ignore-dir")
+                .takes_value(true)
+                .help("Path to a directory containing textfiles that \
+                    are a list of article names to ignore")
+            )
         )
         .subcommand(SubCommand::with_name("analyze")
             .about("Analyse using an intermediate file")
@@ -108,20 +115,35 @@ fn main() {
                     .short("r")
                     .long("roots")
                     .takes_value(true)
-                    .required(true)
+                    .required(false)
                     .multiple(true)
-                    .help("Root articles to evaluate step groups from (supports multiple)")
+                    .help("Root articles to evaluate step groups from (supports multiple).")
+                )
+                .arg(Arg::with_name("use-most-linked")
+                    .short("m")
+                    .long("use-most-linked")
+                    .takes_value(true)
+                    .required(false)
+                    .help("Use the top n most linked articles as the roots. \
+                              Set to zero to use all articles")
                 )
             )
         )
         .get_matches();
 
     if let Some(matches) = matches.subcommand_matches("parse") {
+
+        let to_ignore = match matches.value_of("ignore") {
+            Some(ignore_path) => Some(parse::parse_ignore_directory(&ignore_path.to_string())),
+            None => None
+        };
+
         let (mut map, mut articles) = parse::parse_xml_dump(
             &matches
                 .value_of("input")
                 .expect("Input must be given")
                 .to_string(),
+            to_ignore
         );
 
         parse::write_to_tsv(
@@ -162,15 +184,15 @@ fn main() {
             let link_counts = analysis.get_most_incoming_links(count);
             writeln!(output, "incoming link count,number of articles with count").unwrap();
             for (index, (article_name, count)) in link_counts.iter().enumerate() {
-                writeln!(output, "{}, \"{}\", {}", index, article_name, count).unwrap();
+                writeln!(output, "{}\t{}\t{}", index, article_name, count).unwrap();
             }
         }
 
         else if let Some(_matches) = matches.subcommand_matches("incoming-link-histogram") {
             let link_counts = analysis.get_incoming_links_histogram();
-            writeln!(output, "incoming link count,number of articles with count").unwrap();
+            writeln!(output, "incoming link count\tnumber of articles with count").unwrap();
             for (index, count) in link_counts.iter().enumerate() {
-                writeln!(output, "{}, {}", index, count).unwrap();
+                writeln!(output, "{}\t{}", index, count).unwrap();
             }
         }
 
@@ -240,12 +262,26 @@ fn main() {
                 output,
                 "Article name\tincoming links (depth 0)\tincoming links (depth 1)\t...").unwrap();
 
-            for root_article in matches.values_of("roots").unwrap() {
+            let roots: Vec<&str>;
+            if matches.is_present("use-most-linked") {
+                let count: usize = matches.value_of("use-most-linked").unwrap().parse().unwrap();
+                let link_counts = analysis.get_most_incoming_links(count);
+                roots = link_counts.iter().map(|x| x.0.as_str()).collect();
+            }
+            else if matches.is_present("roots") {
+                roots = matches.values_of("roots").unwrap().collect();
+            }
+            else {
+                println!("Must use one of: use-most-linked or roots");
+                return;
+            }
+
+            for root_article in roots {
                 let root_article_index = match analysis.article_map.get(root_article) {
                     Some(index) => index,
                     None => {
                         println!("Article with name '{}' not found", root_article);
-                        return;
+                        continue;
                     }
                 };
                 let step_groups = analysis.get_step_count_groups(
