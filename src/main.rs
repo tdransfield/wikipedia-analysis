@@ -2,6 +2,8 @@
 use std::io;
 use std::fs::File;
 use clap::{Arg, App, SubCommand};
+use rand::{Rng, thread_rng};
+use std::collections::HashMap;
 
 pub mod parse;
 pub mod analyze;
@@ -138,6 +140,13 @@ fn main() {
                     .help("Use the top n most linked articles as the roots. \
                               Set to zero to use all articles")
                 )
+                .arg(Arg::with_name("use-random")
+                    .short("r")
+                    .long("use-random")
+                    .takes_value(true)
+                    .required(false)
+                    .help("Use n randomly selected articles")
+                )
             )
         )
         .get_matches();
@@ -186,6 +195,8 @@ fn main() {
             articles: adjacency_list
         };
 
+        let index_map = generate_index_lookup_table(&analysis.article_map);
+
         if let Some(matches) = matches.subcommand_matches("most-linked") {
             let count: usize = match matches.value_of("count").unwrap().parse().unwrap() {
                 0 => analysis.articles.len(),
@@ -217,8 +228,8 @@ fn main() {
                 }
             };
             let articles = analysis.get_incoming_articles(*start_article_index);
-            for article_name in articles.iter() {
-                writeln!(output, "{}", article_name).unwrap();
+            for article_index in articles.iter() {
+                writeln!(output, "{}", index_map[*article_index]).unwrap();
             }
         }
 
@@ -273,8 +284,16 @@ fn main() {
                 *start_article_index, *destination_article_index
             );
             match step_count {
-                Some(count) => writeln!(output, "Step count: {}", count.join(",")).unwrap(),
-                None => writeln!(output, "No path from start to destination found").unwrap()
+                Some(count) => {
+                    let article_names: Vec<String> = count
+                        .iter()
+                        .map(|x| index_map[*x].clone())
+                        .collect();
+                    writeln!(output, "Step count: {}", article_names.join(",")).unwrap();
+                },
+                None => {
+                    writeln!(output, "No path from start to destination found").unwrap();
+                }
             };
         }
 
@@ -288,40 +307,66 @@ fn main() {
                 output,
                 "Article name\tincoming links (depth 0)\tincoming links (depth 1)\t...").unwrap();
 
-            let roots: Vec<&str>;
+            let mut roots: Vec<usize> = Vec::new();
             if matches.is_present("use-most-linked") {
                 let count: usize = matches.value_of("use-most-linked").unwrap().parse().unwrap();
-                let link_counts = analysis.get_most_incoming_links(count);
-                roots = link_counts.iter().map(|x| x.0.as_str()).collect();
+                roots = analysis.get_most_incoming_links(count)
+                    .iter()
+                    .map(|x| x.0)
+                    .collect();
+            }
+            else if matches.is_present("use-random") {
+                let count: usize = matches.value_of("use-random").unwrap().parse().unwrap();
+                let mut rng = thread_rng();
+                for _ in 0..count {
+                    let article_index = rng.gen_range(0, analysis.articles.len());
+                    roots.push(article_index);
+                }
             }
             else if matches.is_present("roots") {
-                roots = matches.values_of("roots").unwrap().collect();
+                for article in matches.values_of("roots").unwrap() {
+                    match analysis.article_map.get(article) {
+                        Some(article_index) => {
+                            roots.push(*article_index);
+                        },
+                        None => {
+                            println!("Article with name '{}' not found", article);
+                        }
+                    };
+                };
             }
             else {
-                println!("Must use one of: use-most-linked or roots");
+                println!("Must use one of: [use-most-linked, random, roots]");
                 return;
             }
 
-            for root_article in roots {
-                let root_article_index = match analysis.article_map.get(root_article) {
-                    Some(index) => index,
-                    None => {
-                        println!("Article with name '{}' not found", root_article);
-                        continue;
-                    }
-                };
+            for root_article_index in roots {
                 let step_groups = analysis.get_step_count_groups(
-                    *root_article_index, depth
+                    root_article_index, depth
                 );
                 let steps_strs: Vec<String> = step_groups
                     .iter()
                     .map(|x| x.len().to_string())
                     .collect();
-                writeln!(output, "{}\t{}", root_article, steps_strs.join("\t")).unwrap();
+                let root_article_name = index_map[root_article_index];
+                writeln!(output, "{}\t{}", root_article_name, steps_strs.join("\t")).unwrap();
             }
         }
     }
     else {
         print!("{}", matches.usage());
     }
+}
+
+/// Generates a hashmap from article index -> article name
+fn generate_index_lookup_table(article_map: &HashMap<String, usize>) -> Vec<&String> {
+    unsafe {
+        let mut index_lookup_table = Vec::with_capacity(article_map.len());
+        index_lookup_table.set_len(article_map.len());
+        for (article_name, index) in article_map.iter() {
+            index_lookup_table[*index] = article_name;
+        }
+        return index_lookup_table;
+    }
+
 }

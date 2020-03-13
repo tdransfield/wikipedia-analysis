@@ -21,28 +21,19 @@ impl WikipediaAnalysis {
         }
     }
 
-    /// Generates a hashmap from article index -> article name
-    fn generate_index_lookup_table(&self) -> HashMap<usize, &String> {
-        let mut index_lookup_table = HashMap::new();
-        for (article_name, index) in self.article_map.iter() {
-            index_lookup_table.insert(index.clone(), article_name);
-        }
-        return index_lookup_table;
-    }
-
     /// Gets a sorted list of the pages with the most incoming links.
     ///
     /// # Arguments
     /// * `count` - Number of items to return
     ///
     /// # Returns
-    /// A sorted vector of tuples of (article name, incoming link count).
+    /// A sorted vector of tuples of (article index, incoming link count).
     /// The vector is of length `count` unless `count` exceeds the number of articles.
     ///
-    pub fn get_most_incoming_links(&self, count: usize) -> Vec<(&String, usize)> {
+    pub fn get_most_incoming_links(&self, count: usize) -> Vec<(usize, usize)> {
         let mut link_counts_map = Vec::new();
-        for (article_name, index) in self.article_map.iter() {
-            link_counts_map.push((article_name, self.articles[*index].incoming_links.len()));
+        for (_article_name, index) in self.article_map.iter() {
+            link_counts_map.push((*index, self.articles[*index].incoming_links.len()));
         }
         link_counts_map.sort_unstable_by(|a, b| b.1.cmp(&a.1));
         return link_counts_map[0..count].to_vec();
@@ -128,7 +119,7 @@ impl WikipediaAnalysis {
     pub fn get_path_between_articles(
         &self,
         start_article: usize,
-        destination_article: usize) -> Option<Vec<String>> {
+        destination_article: usize) -> Option<Vec<usize>> {
 
         // Perform a breadth-first-search for destination article from start article
         // BFS guarantees shortest path
@@ -154,16 +145,14 @@ impl WikipediaAnalysis {
                     // First time this is seen is guaranteed to be
                     // the shortest (or equal-shortest) route
                     if *next_article == start_article {
-                        let mut path: Vec<String> = Vec::with_capacity(article_path.len() + 1);
-                        let lookup_table = self.generate_index_lookup_table();
+                        let mut path = Vec::with_capacity(article_path.len() + 1);
 
                         // Generate output vec in correct order
-                        path.push(lookup_table[&start_article].clone());
+                        path.push(start_article);
                         for index in article_path.iter().rev() {
-                            path.push(lookup_table[&index].clone());
+                            path.push(*index);
                         }
-                        path.push(lookup_table[&destination_article].clone());
-
+                        path.push(destination_article);
                         return Some(path);
                     }
 
@@ -258,16 +247,14 @@ impl WikipediaAnalysis {
         return groups;
     }
 
-    /// Gets a list of article names with links to the root article.
+    /// Gets a list of articles with links to the root article.
     /// # Arguments
     /// * `root_article` - The root of the incoming link tree. Note: only evaluated to depth=1
     ///
     /// # Returns
-    /// A list of article names (strings) with links to the root article.
+    /// A list of article indices with links to the root article.
     ///
-    pub fn get_incoming_articles(&self, root_article: usize) -> Vec<&String> {
-        let lookup_table = self.generate_index_lookup_table();
-        let incoming_links = &self.articles[root_article].incoming_links;
-        return incoming_links.iter().map(|x| lookup_table[x]).collect();
+    pub fn get_incoming_articles(&self, root_article: usize) -> &Vec<usize> {
+        return &self.articles[root_article].incoming_links;
     }
 }
