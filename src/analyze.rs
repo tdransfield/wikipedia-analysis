@@ -257,4 +257,17 @@ impl WikipediaAnalysis {
         }
         return groups;
     }
+
+    /// Gets a list of article names with links to the root article.
+    /// # Arguments
+    /// * `root_article` - The root of the incoming link tree. Note: only evaluated to depth=1
+    ///
+    /// # Returns
+    /// A list of article names (strings) with links to the root article.
+    ///
+    pub fn get_incoming_articles(&self, root_article: usize) -> Vec<&String> {
+        let lookup_table = self.generate_index_lookup_table();
+        let incoming_links = &self.articles[root_article].incoming_links;
+        return incoming_links.iter().map(|x| lookup_table[x]).collect();
+    }
 }

@@ -65,6 +65,17 @@ fn main() {
             .subcommand(SubCommand::with_name("incoming-link-histogram")
                 .about("List the number of articles with a given number of incoming links")
             )
+            .subcommand(SubCommand::with_name("print-incoming-links")
+                .about("Print the names of articles which link to the start article")
+                .arg(Arg::with_name("start")
+                    .short("s")
+                    .long("start")
+                    .takes_value(true)
+                    .required(true)
+                    .index(1)
+                    .help("Name of article to start from")
+                )
+            )
             .subcommand(SubCommand::with_name("count-steps")
                 .about("Count the number of steps between two articles, from start to destination")
                 .arg(Arg::with_name("start")
@@ -193,6 +204,21 @@ fn main() {
             writeln!(output, "incoming link count\tnumber of articles with count").unwrap();
             for (index, count) in link_counts.iter().enumerate() {
                 writeln!(output, "{}\t{}", index, count).unwrap();
+            }
+        }
+
+        else if let Some(matches) = matches.subcommand_matches("print-incoming-links") {
+            let start_article = matches.value_of("start").unwrap();
+            let start_article_index = match analysis.article_map.get(start_article) {
+                Some(index) => index,
+                None => {
+                    println!("Article with name '{}' not found", start_article);
+                    return;
+                }
+            };
+            let articles = analysis.get_incoming_articles(*start_article_index);
+            for article_name in articles.iter() {
+                writeln!(output, "{}", article_name).unwrap();
             }
         }
 
