@@ -228,10 +228,17 @@ impl WikipediaAnalysis {
         let mut visited: Vec<bool> = Vec::with_capacity(self.articles.len());
         WikipediaAnalysis::vec_initialise_up_to_index(&mut visited, self.articles.len(), false);
 
+        // Initialise visited elements
+        // Visited is set before expanding a node to avoid having
+        // multiple of the same nodes in the to visit group.
+        visited[root_article] = true;
+        for next_article in self.articles[root_article].incoming_links.iter() {
+            visited[*next_article] = true;
+        }
+
         while depth > 1 {
             let current_article_stack = &groups[groups.len() - 1];
             let mut next_article_stack: Vec<usize> = Vec::new();
-
             for current_article in current_article_stack.iter() {
                 for next_article in self.articles[*current_article].incoming_links.iter() {
                     if visited[*next_article] == false {
