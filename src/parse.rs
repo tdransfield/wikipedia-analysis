@@ -51,6 +51,7 @@ fn is_valid_title(title: &str) -> bool {
             title.starts_with("Portal") ||
             title.starts_with("Template") ||
             title.starts_with("Draft") ||
+            title.starts_with("Module") ||
             title.starts_with("User") ||
             title.starts_with("Commons") ||
             title.starts_with("Wikt") ||
@@ -210,7 +211,7 @@ pub fn parse_xml_dump(
     articles_to_ignore: Option<HashSet<String>>) -> (HashMap<String, usize>, Vec<Article>) {
 
     // Compile regexes once for efficiency
-    let link_regex = Regex::new(r"\[\[([^\[\]]+)\]\]").unwrap();
+    let link_regex = Regex::new(r"[^=]\[\[([^\[\]]+)\]\]").unwrap();
     let infobox_regex = Regex::new(r"(?ms)\{\{Infobox.*?^\}\}").unwrap();
     let main_article_regex = Regex::new(r"\{\{main article\|([^{}\|]+?)\}\}").unwrap();
     let see_also_regex = Regex::new(r"\{\{see also\|([^\{\}]+?)\}\}").unwrap();
@@ -281,7 +282,6 @@ pub fn parse_xml_dump(
 
         // Normal article page
         else if !is_disambiguation {
-            let article_name = article_name;
             match article_map.get(&article_name) {
                 Some(_) => println!("Multiple page insertions, should not happen: {}", article_name),
                 None => {
