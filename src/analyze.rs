@@ -21,44 +21,47 @@ impl WikipediaAnalysis {
         }
     }
 
-    /// Gets a sorted list of the pages with the most incoming links.
+    /// Gets a sorted list of the pages with the most links.
     ///
     /// # Arguments
     /// * `count` - Number of items to return
     ///
     /// # Returns
-    /// A sorted vector of tuples of (article index, incoming link count).
+    /// A sorted vector of tuples of (article index, link count).
     /// The vector is of length `count` unless `count` exceeds the number of articles.
     ///
-    pub fn get_most_incoming_links(&self, count: usize) -> Vec<(usize, usize)> {
+    pub fn get_most_links(&self, count: usize) -> Vec<(usize, usize)> {
         let mut link_counts_map = Vec::new();
         for (_article_name, index) in self.article_map.iter() {
-            link_counts_map.push((*index, self.articles[*index].incoming_links.len()));
+            link_counts_map.push((*index, self.articles[*index].links.len()));
         }
         link_counts_map.sort_unstable_by(|a, b| b.1.cmp(&a.1));
         return link_counts_map[0..count].to_vec();
     }
 
-    /// Gets a histogram of the number of incoming links per page.
+    /// Gets a histogram of the number of links per page.
     ///
     /// # Returns
-    /// Returns a vector indexed by the number of incoming links.
-    /// Values are the number of pages with that number of incoming links.
-    pub fn get_incoming_links_histogram(&self) -> Vec<u32> {
+    /// Returns a vector indexed by the number of links.
+    /// Values are the number of pages with that number of links.
+    pub fn get_links_histogram(&self) -> Vec<u32> {
         let mut link_counts: Vec<u32> = Vec::new();
         for article in self.articles.iter() {
             WikipediaAnalysis::vec_initialise_up_to_index(
                 &mut link_counts,
-                article.incoming_links.len(),
+                article.links.len(),
                 0
             );
-            link_counts[article.incoming_links.len()] += 1;
+            link_counts[article.links.len()] += 1;
         }
         return link_counts;
     }
 
     /// Gets the number of steps between two articles.
-    /// Steps refers to points on the path of incoming links.
+    /// Steps refers to points on the path of links between the articles.
+    ///
+    /// Note: Argument names are intended for incoming link representation. If you are using an
+    /// input file that was generated as outgoing links then the arguments are reversed,
     ///
     /// # Arguments
     /// * `start_article` - The article to start stepping from
@@ -81,7 +84,7 @@ impl WikipediaAnalysis {
         let mut depth = 1;
         let mut current_article_stack: Vec<usize> = Vec::new();
         let mut next_article_stack: Vec<usize> = Vec::new();
-        let mut starting_links = self.articles[destination_article].incoming_links.clone();
+        let mut starting_links = self.articles[destination_article].links.clone();
         current_article_stack.append(&mut starting_links);
 
         loop {
@@ -89,7 +92,7 @@ impl WikipediaAnalysis {
                 if article_index == start_article {
                     return Some(depth);
                 }
-                next_article_stack.extend(self.articles[article_index].incoming_links.iter());
+                next_article_stack.extend(self.articles[article_index].links.iter());
 
             }
             current_article_stack.extend(next_article_stack.iter());
@@ -102,7 +105,10 @@ impl WikipediaAnalysis {
     }
 
     /// Gets the path between two articles.
-    /// Steps refers to points on the path of incoming links.
+    /// Steps refers to points on the path of links between the articles.
+    ///
+    /// Note: Argument names are intended for incoming link representation. If you are using an
+    /// input file that was generated as outgoing links then the arguments are reversed,
     ///
     /// # Arguments
     /// * `start_article` - The article to start stepping from
@@ -131,7 +137,7 @@ impl WikipediaAnalysis {
         WikipediaAnalysis::vec_initialise_up_to_index(&mut visited, self.articles.len(), false);
 
 
-        for article in self.articles[destination_article].incoming_links.iter() {
+        for article in self.articles[destination_article].links.iter() {
             current_article_stack.push(vec!(*article));
             visited[*article] = true;
         }
@@ -140,7 +146,7 @@ impl WikipediaAnalysis {
             for article_path in current_article_stack.drain(..) {
                 let current_article = article_path[article_path.len() - 1];
 
-                for next_article in self.articles[current_article].incoming_links.iter() {
+                for next_article in self.articles[current_article].links.iter() {
 
                     // First time this is seen is guaranteed to be
                     // the shortest (or equal-shortest) route
@@ -211,7 +217,7 @@ impl WikipediaAnalysis {
             None => self.articles.len()
         };
         let mut groups: Vec<Vec<usize>> = Vec::new();
-        groups.push( self.articles[root_article].incoming_links.clone());
+        groups.push( self.articles[root_article].links.clone());
 
         // Array to check if a node has been visited
         let mut visited: Vec<bool> = Vec::with_capacity(self.articles.len());
@@ -221,7 +227,7 @@ impl WikipediaAnalysis {
         // Visited is set before expanding a node to avoid having
         // multiple of the same nodes in the to visit group.
         visited[root_article] = true;
-        for next_article in self.articles[root_article].incoming_links.iter() {
+        for next_article in self.articles[root_article].links.iter() {
             visited[*next_article] = true;
         }
 
@@ -229,7 +235,7 @@ impl WikipediaAnalysis {
             let current_article_stack = &groups[groups.len() - 1];
             let mut next_article_stack: Vec<usize> = Vec::new();
             for current_article in current_article_stack.iter() {
-                for next_article in self.articles[*current_article].incoming_links.iter() {
+                for next_article in self.articles[*current_article].links.iter() {
                     if visited[*next_article] == false {
                         next_article_stack.push(*next_article);
                         visited[*next_article] = true;
@@ -245,16 +251,5 @@ impl WikipediaAnalysis {
             depth -= 1;
         }
         return groups;
-    }
-
-    /// Gets a list of articles with links to the root article.
-    /// # Arguments
-    /// * `root_article` - The root of the incoming link tree. Note: only evaluated to depth=1
-    ///
-    /// # Returns
-    /// A list of article indices with links to the root article.
-    ///
-    pub fn get_incoming_articles(&self, root_article: usize) -> &Vec<usize> {
-        return &self.articles[root_article].incoming_links;
     }
 }

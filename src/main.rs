@@ -38,6 +38,13 @@ fn main() {
                 .help("Path to a directory containing textfiles that \
                     are a list of article names to ignore")
             )
+            .arg(Arg::with_name("reverse")
+                .short("r")
+                .long("reverse")
+                .takes_value(false)
+                .help("Reverse the intermediate file format to be a list of outgoing links \
+                          instead of a list of incoming links")
+            )
         )
         .subcommand(SubCommand::with_name("analyze")
             .about("Analyse using an intermediate file")
@@ -158,12 +165,18 @@ fn main() {
             None => None
         };
 
+        let mode = match matches.is_present("reverse") {
+            true => parse::ParserMode::OutgoingLinks,
+            false => parse::ParserMode::IncomingLinks
+        };
+
         let (mut map, mut articles) = parse::parse_xml_dump(
             &matches
                 .value_of("input")
                 .expect("Input must be given")
                 .to_string(),
-            to_ignore
+            to_ignore,
+            mode
         );
 
         parse::write_to_tsv(
@@ -203,22 +216,22 @@ fn main() {
                 x => x
             };
 
-            let link_counts = analysis.get_most_incoming_links(count);
-            writeln!(output, "incoming link count,number of articles with count").unwrap();
+            let link_counts = analysis.get_most_links(count);
+            writeln!(output, "link count,number of articles with count").unwrap();
             for (index, (article_name, count)) in link_counts.iter().enumerate() {
                 writeln!(output, "{}\t{}\t{}", index, article_name, count).unwrap();
             }
         }
 
-        else if let Some(_matches) = matches.subcommand_matches("incoming-link-histogram") {
-            let link_counts = analysis.get_incoming_links_histogram();
-            writeln!(output, "incoming link count\tnumber of articles with count").unwrap();
+        else if let Some(_matches) = matches.subcommand_matches("link-histogram") {
+            let link_counts = analysis.get_links_histogram();
+            writeln!(output, "link count\tnumber of articles with count").unwrap();
             for (index, count) in link_counts.iter().enumerate() {
                 writeln!(output, "{}\t{}", index, count).unwrap();
             }
         }
 
-        else if let Some(matches) = matches.subcommand_matches("print-incoming-links") {
+        else if let Some(matches) = matches.subcommand_matches("print-links") {
             let start_article = matches.value_of("start").unwrap();
             let start_article_index = match analysis.article_map.get(start_article) {
                 Some(index) => index,
@@ -227,7 +240,7 @@ fn main() {
                     return;
                 }
             };
-            let articles = analysis.get_incoming_articles(*start_article_index);
+            let articles = &analysis.articles[*start_article_index].links;
             for article_index in articles.iter() {
                 writeln!(output, "{}", index_map[*article_index]).unwrap();
             }
@@ -305,12 +318,12 @@ fn main() {
 
             writeln!(
                 output,
-                "Article name\tincoming links (depth 0)\tincoming links (depth 1)\t...").unwrap();
+                "Article name\tlinks (depth 0)\tlinks (depth 1)\t...").unwrap();
 
             let mut roots: Vec<usize> = Vec::new();
             if matches.is_present("use-most-linked") {
                 let count: usize = matches.value_of("use-most-linked").unwrap().parse().unwrap();
-                roots = analysis.get_most_incoming_links(count)
+                roots = analysis.get_most_links(count)
                     .iter()
                     .map(|x| x.0)
                     .collect();

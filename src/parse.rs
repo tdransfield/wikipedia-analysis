@@ -12,11 +12,19 @@ enum ParserState {
     ReadingBody
 }
 
+pub enum ParserMode {
+    IncomingLinks,
+    OutgoingLinks
+}
+
 pub struct Article {
-    /// This is part of an adjacency list representation of the incoming link graph
-    /// Incoming links are identified by their index in this vector
+    /// This is part of an adjacency list representation of the link graph
+    /// Links are identified by their index in this vector
     /// Article names are not preserved.
-    pub incoming_links: Vec<usize>
+    /// Links may be incoming (ie links to current page)
+    /// or outgoing (links to other pages from this page)
+    /// Depending on the `ParserMode` used when parsing the XML dump.
+    pub links: Vec<usize>
 }
 
 /// Approximate number of articles in the 2017_11_03 wikipedia XML dump
@@ -169,15 +177,16 @@ fn scan_pages<F>(xml_path: &String, mut valid_page_callback: F) -> ()
     }
 }
 
-/// Parses a wikipedia XML database dump into an adjacency list of incoming links.
+/// Parses a wikipedia XML database dump into an adjacency list of links.
 ///
 /// # Arguments
 /// * `xml_path` - Path to the unprocessed XML database dump
 /// * `articles_to_ignore` - A hashset of article names to ignore when constructing the graph.
+/// * `mode` - What the output representation should be, a list of incoming links or outgoing links
 ///
 /// # Returns
 ///  * A HashMap of article name -> article index
-///  * An adjacency list representation of the incoming links to each article.
+///  * An adjacency list representation of the links to/from each article.
 ///
 /// # Panics
 /// There are several potential panics from regexes relating to the format of text within the XML document.
@@ -201,14 +210,16 @@ fn scan_pages<F>(xml_path: &String, mut valid_page_callback: F) -> ()
 /// until they point to a real page. For all links, if no real page is found to match then the link
 /// is not added. In practise there are many more empty links than real page links.
 /// 
-/// The incoming link adjacency list representation was chosen as it makes later analysis much
-/// easier to process (for my intended use cases). Parsing is harder as state must be maintained
+/// Most functions in `WikipediaAnalysis` were designed for the incoming link adjacency list
+/// representation was as it is easier to process (for my intended use cases).
+/// With this representation parsing is harder as state must be maintained
 /// during the parsing process, however this only needs to be done once then the result is saved
 /// so this was a good compromise for my use case.
 ///
 pub fn parse_xml_dump(
     xml_path: &String,
-    articles_to_ignore: Option<HashSet<String>>) -> (HashMap<String, usize>, Vec<Article>) {
+    articles_to_ignore: Option<HashSet<String>>,
+    mode: ParserMode) -> (HashMap<String, usize>, Vec<Article>) {
 
     // Compile regexes once for efficiency
     let link_regex = Regex::new(r"[^=]\[\[([^\[\]]+)\]\]").unwrap();
@@ -290,7 +301,7 @@ pub fn parse_xml_dump(
                         article_map.len()
                     );
                     articles.push(Article {
-                        incoming_links: Vec::new()
+                        links: Vec::new()
                     });
                 }
             }
@@ -299,10 +310,11 @@ pub fn parse_xml_dump(
 
     scan_pages(xml_path, get_valid_pages);
 
-    // Finally parse articles again for their outgoing links
+    // Finally parse articles again for their links
     // Place each outgoing link as an incoming link in the graph with
     // the source being the current article and the destination being the
-    // article link found in the current article's body
+    // article link found in the current article's body. If the mode is set to OutgoingLinks
+    // then source and destination article are swapped
     // Any links to redirects are redirected towards the real article after
     // following the redirects
     let redirects_map = resolve_redirects(&article_map, &mut redirect_to);
@@ -365,7 +377,14 @@ pub fn parse_xml_dump(
 
             match dest_article_index {
                 Some(dest_article_index) => {
-                    articles[*dest_article_index].incoming_links.push(*source_article_index);
+                    match &mode {
+                        ParserMode::IncomingLinks => {
+                            articles[*dest_article_index].links.push(*source_article_index);
+                        },
+                        ParserMode::OutgoingLinks => {
+                            articles[*source_article_index].links.push(*dest_article_index);
+                        }
+                    }
                 },
                 None => ()
             }
@@ -385,7 +404,7 @@ pub fn parse_xml_dump(
 /// # Arguments
 /// * `output_path` - File path to write the TSV output to
 /// * `article_map` - Hashmap of article name -> article index
-/// * `articles` - Adjacency list representation of incoming links graph
+/// * `articles` - Adjacency list representation of links graph
 ///
 pub fn write_to_tsv(
     output_path: &String,
@@ -411,8 +430,8 @@ pub fn write_to_tsv(
             .as_ref()
             .expect("Title index defined");
 
-        articles[article_index].incoming_links.dedup();
-        let links_string: String = articles[article_index].incoming_links
+        articles[article_index].links.dedup();
+        let links_string: String = articles[article_index].links
             .iter()
             .map(|x| x.to_string())
             .collect::<Vec<String>>()
@@ -434,7 +453,8 @@ pub fn write_to_tsv(
 ///
 /// # Returns
 ///  * A HashMap of article name -> article index
-///  * An adjacency list representation of the incoming links to each article.
+///  * An adjacency list representation of the links to each article (may be incoming or outgoing
+///    depending on how the source tsv file was generated using `parse_xml_dump()`).
 ///
 /// # Panics
 /// May panic if the TSV file becomes corrupted
@@ -451,7 +471,7 @@ pub fn load_from_tsv(tsv_path: &String) -> (HashMap<String, usize>, Vec<Article>
         let fields: Vec<&str> = line.split("\t").collect();
 
         // TSV has at least 2 fields:
-        // Index \t Article name \t Redirect field \t article exists \t Incoming link indicies
+        // Index \t Article name \t link indices
         if fields.len() >= 2 {
             let article_index = fields[0].parse::<usize>().unwrap();
             let article_title = fields[1].to_string();
@@ -464,7 +484,7 @@ pub fn load_from_tsv(tsv_path: &String) -> (HashMap<String, usize>, Vec<Article>
             // and the adjacency list indexes will be wrong
             assert_eq!(adjacency_list.len(), article_index);
 
-            let incoming_links = match fields[2].len() > 0 {
+            let links = match fields[2].len() > 0 {
                 true => fields[2..]
                         .iter()
                         .map(|x| x.parse::<usize>().unwrap())
@@ -473,7 +493,7 @@ pub fn load_from_tsv(tsv_path: &String) -> (HashMap<String, usize>, Vec<Article>
             };
 
             adjacency_list.push(Article {
-                incoming_links
+                links
             });
         }
     }
