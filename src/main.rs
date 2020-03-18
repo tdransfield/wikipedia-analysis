@@ -4,6 +4,8 @@ use std::fs::File;
 use clap::{Arg, App, SubCommand};
 use rand::{Rng, thread_rng};
 use std::collections::HashMap;
+use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
 
 pub mod parse;
 pub mod analyze;
@@ -191,9 +193,9 @@ fn main() {
 
     else if let Some(matches) = matches.subcommand_matches("analyze") {
 
-        let mut output = match matches.value_of("output") {
-            Some(filename) => Box::new(File::create(filename).unwrap()) as Box<dyn io::Write>,
-            None => Box::new(io::stdout()) as Box<dyn io::Write>
+        let mut output: Box<dyn io::Write + Send> = match matches.value_of("output") {
+            Some(filename) => Box::new(File::create(filename).unwrap()),
+            None => Box::new(io::stdout())
         };
 
         let (lookup_table, adjacency_list) = parse::load_from_tsv(
@@ -353,7 +355,9 @@ fn main() {
                 return;
             }
 
-            for root_article_index in roots {
+            let write_mutex = Arc::new(Mutex::new(output));
+
+            let steps_function = |root_article_index| {
                 let step_groups = analysis.get_step_count_groups(
                     root_article_index, depth
                 );
@@ -362,8 +366,12 @@ fn main() {
                     .map(|x| x.len().to_string())
                     .collect();
                 let root_article_name = index_map[root_article_index];
-                writeln!(output, "{}\t{}", root_article_name, steps_strs.join("\t")).unwrap();
-            }
+
+                let mut mutex = write_mutex.lock().unwrap();
+                writeln!(mutex, "{}\t{}", root_article_name, steps_strs.join("\t")).unwrap();
+            };
+
+            roots.into_par_iter().for_each(steps_function);
         }
     }
     else {
