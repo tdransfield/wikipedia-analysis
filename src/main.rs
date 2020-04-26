@@ -6,6 +6,9 @@ use rand::{Rng, thread_rng};
 use std::collections::HashMap;
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
+use std::io::{BufReader, BufRead};
+use num_cpus;
+use std::cmp;
 
 pub mod parse;
 pub mod analyze;
@@ -73,10 +76,10 @@ fn main() {
                     .help("Number of items to list")
                 )
             )
-            .subcommand(SubCommand::with_name("incoming-link-histogram")
-                .about("List the number of articles with a given number of incoming links")
+            .subcommand(SubCommand::with_name("link-histogram")
+                .about("List the number of articles with a given number of links")
             )
-            .subcommand(SubCommand::with_name("print-incoming-links")
+            .subcommand(SubCommand::with_name("links")
                 .about("Print the names of articles which link to the start article")
                 .arg(Arg::with_name("start")
                     .short("s")
@@ -106,7 +109,7 @@ fn main() {
                     .help("Name of article to find step count to")
                 )
             )
-            .subcommand(SubCommand::with_name("print-steps")
+            .subcommand(SubCommand::with_name("steps")
                 .about("Print the articles between two articles, from start to destination")
                 .arg(Arg::with_name("start")
                     .short("s")
@@ -125,7 +128,7 @@ fn main() {
                     .help("Name of article to find step count to")
                 )
             )
-            .subcommand(SubCommand::with_name("print-step-groups")
+            .subcommand(SubCommand::with_name("step-groups")
                 .about("Print the articles grouped by depth away from the root article")
                 .arg(Arg::with_name("depth")
                     .short("d")
@@ -134,15 +137,21 @@ fn main() {
                     .help("Maximum depth of article tree to evaluate")
                 )
                 .arg(Arg::with_name("roots")
-                    .short("r")
                     .long("roots")
                     .takes_value(true)
                     .required(false)
                     .multiple(true)
+                    .conflicts_with_all(&["roots-file", "use-most-linked", "use-random"])
                     .help("Root articles to evaluate step groups from (supports multiple).")
                 )
+                .arg(Arg::with_name("roots-file")
+                    .long("roots-file")
+                    .takes_value(true)
+                    .required(false)
+                    .conflicts_with_all(&["roots", "use-most-linked", "use-random"])
+                    .help("Use a file with a list of roots to evaluate (separated by newline).")
+                )
                 .arg(Arg::with_name("use-most-linked")
-                    .short("m")
                     .long("use-most-linked")
                     .takes_value(true)
                     .required(false)
@@ -150,11 +159,18 @@ fn main() {
                               Set to zero to use all articles")
                 )
                 .arg(Arg::with_name("use-random")
-                    .short("r")
                     .long("use-random")
                     .takes_value(true)
                     .required(false)
                     .help("Use n randomly selected articles")
+                )
+                .arg(Arg::with_name("num-threads")
+                    .short("j")
+                    .long("num-threads")
+                    .takes_value(true)
+                    .required(false)
+                    .help("Number of worker threads to use for parallel processing. Defaults to \
+                          the number of physical CPU cores -1 (or 1 for single core systems).")
                 )
             )
         )
@@ -219,8 +235,9 @@ fn main() {
             };
 
             let link_counts = analysis.get_most_links(count);
-            writeln!(output, "link count,number of articles with count").unwrap();
-            for (index, (article_name, count)) in link_counts.iter().enumerate() {
+            writeln!(output, "position,article name,count").unwrap();
+            for (index, (article_index, count)) in link_counts.iter().enumerate() {
+                let article_name = index_map[*article_index];
                 writeln!(output, "{}\t{}\t{}", index, article_name, count).unwrap();
             }
         }
@@ -233,7 +250,7 @@ fn main() {
             }
         }
 
-        else if let Some(matches) = matches.subcommand_matches("print-links") {
+        else if let Some(matches) = matches.subcommand_matches("links") {
             let start_article = matches.value_of("start").unwrap();
             let start_article_index = match analysis.article_map.get(start_article) {
                 Some(index) => index,
@@ -276,7 +293,7 @@ fn main() {
             };
         }
 
-        else if let Some(matches) = matches.subcommand_matches("print-steps") {
+        else if let Some(matches) = matches.subcommand_matches("steps") {
 
             let start_article = matches.value_of("start").unwrap();
             let destination_article = matches.value_of("destination").unwrap();
@@ -312,7 +329,7 @@ fn main() {
             };
         }
 
-        else if let Some(matches) = matches.subcommand_matches("print-step-groups") {
+        else if let Some(matches) = matches.subcommand_matches("step-groups") {
             let depth = match matches.value_of("depth") {
                 Some(match_value) => Some(match_value.parse().unwrap()),
                 None => None
@@ -350,6 +367,22 @@ fn main() {
                     };
                 };
             }
+            else if matches.is_present("roots-file") {
+                let filename = matches.value_of("roots-file").unwrap();
+                let file = File::open(filename).unwrap();
+                let reader = BufReader::new(file);
+                for line in reader.lines() {
+                    let article = line.unwrap();
+                    match analysis.article_map.get(&article) {
+                        Some(article_index) => {
+                            roots.push(*article_index);
+                        },
+                        None => {
+                            println!("Article with name '{}' not found", article);
+                        }
+                    };
+                }
+            }
             else {
                 println!("Must use one of: [use-most-linked, random, roots]");
                 return;
@@ -370,6 +403,13 @@ fn main() {
                 let mut mutex = write_mutex.lock().unwrap();
                 writeln!(mutex, "{}\t{}", root_article_name, steps_strs.join("\t")).unwrap();
             };
+
+            // Set number of worker threads
+            let num_threads = match matches.value_of("num-threads") {
+                Some(thread_count) => thread_count.parse::<usize>().unwrap(),
+                None => cmp::max(1, num_cpus::get_physical() - 1)
+            };
+            rayon::ThreadPoolBuilder::new().num_threads(num_threads).build_global().unwrap();
 
             roots.into_par_iter().for_each(steps_function);
         }
