@@ -75,7 +75,10 @@ fn is_valid_title(title: &str) -> bool {
     if let Some(_) = title.find("\t") {
         return false
     }
-    if title.contains("(disambiguation)") {
+    if title.contains("(disambiguation)") ||
+       title.starts_with("List of") ||
+       title.starts_with("Index of") ||
+       title.starts_with("Table of") {
         return false;
     }
     return true;
@@ -335,7 +338,7 @@ pub fn parse_xml_dump(
 
         // Article links are of the form:
         // [[article name#optional_anchor|display name]]
-        let mut outgoing_links: Vec<String> = link_regex
+        let mut links: Vec<String> = link_regex
             .captures_iter(body)
             .map(|x| x
                 .get(1)
@@ -356,19 +359,22 @@ pub fn parse_xml_dump(
                 .split("#").next().unwrap()       // Strip in page anchor
                 .trim()
                 .to_string();
-            outgoing_links.push(link.to_string());
+            links.push(link.to_string());
         }
 
         for capture in see_also_regex.captures_iter(&body) {
             for link in capture.get(1).unwrap().as_str().split("|") {
-                outgoing_links.push(link.split("#").next().unwrap().trim().to_string());
+                links.push(link.split("#").next().unwrap().trim().to_string());
             }
         }
 
-        outgoing_links.dedup();
+        // Remove duplicate elements
+        // May be many links to/from the same page
+        links.sort_unstable();
+        links.dedup();
 
         // Add the incoming links to any destination pages
-        for link_title in outgoing_links {
+        for link_title in links {
 
             let dest_article_index = article_map
                 .get(&link_title)
@@ -430,7 +436,10 @@ pub fn write_to_tsv(
             .as_ref()
             .expect("Title index defined");
 
+        // Some duplicates may remain after the remap table
+        articles[article_index].links.sort_unstable();
         articles[article_index].links.dedup();
+
         let links_string: String = articles[article_index].links
             .iter()
             .map(|x| x.to_string())

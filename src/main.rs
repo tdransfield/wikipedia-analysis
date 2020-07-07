@@ -235,7 +235,7 @@ fn main() {
             };
 
             let link_counts = analysis.get_most_links(count);
-            writeln!(output, "position,article name,count").unwrap();
+            writeln!(output, "position\tarticle name\tcount").unwrap();
             for (index, (article_index, count)) in link_counts.iter().enumerate() {
                 let article_name = index_map[*article_index];
                 writeln!(output, "{}\t{}\t{}", index, article_name, count).unwrap();
