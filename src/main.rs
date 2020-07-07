@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::io::{BufReader, BufRead};
 use num_cpus;
 use std::cmp;
+use std::convert::TryInto;
 
 pub mod parse;
 pub mod analyze;
@@ -229,15 +230,15 @@ fn main() {
         let index_map = generate_index_lookup_table(&analysis.article_map);
 
         if let Some(matches) = matches.subcommand_matches("most-linked") {
-            let count: usize = match matches.value_of("count").unwrap().parse().unwrap() {
-                0 => analysis.articles.len(),
+            let count: u32 = match matches.value_of("count").unwrap().parse().unwrap() {
+                0 => analysis.articles.len().try_into().unwrap(),
                 x => x
             };
 
             let link_counts = analysis.get_most_links(count);
             writeln!(output, "position\tarticle name\tcount").unwrap();
             for (index, (article_index, count)) in link_counts.iter().enumerate() {
-                let article_name = index_map[*article_index];
+                let article_name = index_map[*article_index as usize];
                 writeln!(output, "{}\t{}\t{}", index, article_name, count).unwrap();
             }
         }
@@ -259,9 +260,9 @@ fn main() {
                     return;
                 }
             };
-            let articles = &analysis.articles[*start_article_index].links;
+            let articles = &analysis.articles[*start_article_index as usize].links;
             for article_index in articles.iter() {
-                writeln!(output, "{}", index_map[*article_index]).unwrap();
+                writeln!(output, "{}", index_map[*article_index as usize]).unwrap();
             }
         }
 
@@ -319,7 +320,7 @@ fn main() {
                 Some(count) => {
                     let article_names: Vec<String> = count
                         .iter()
-                        .map(|x| index_map[*x].clone())
+                        .map(|x| index_map[*x as usize].clone())
                         .collect();
                     writeln!(output, "Step count: {}", article_names.join(",")).unwrap();
                 },
@@ -339,20 +340,20 @@ fn main() {
                 output,
                 "Article name\tlinks (depth 0)\tlinks (depth 1)\t...").unwrap();
 
-            let mut roots: Vec<usize> = Vec::new();
+            let mut roots: Vec<u32> = Vec::new();
             if matches.is_present("use-most-linked") {
-                let count: usize = matches.value_of("use-most-linked").unwrap().parse().unwrap();
+                let count: u32 = matches.value_of("use-most-linked").unwrap().parse().unwrap();
                 roots = analysis.get_most_links(count)
                     .iter()
                     .map(|x| x.0)
                     .collect();
             }
             else if matches.is_present("use-random") {
-                let count: usize = matches.value_of("use-random").unwrap().parse().unwrap();
+                let count: u32 = matches.value_of("use-random").unwrap().parse().unwrap();
                 let mut rng = thread_rng();
                 for _ in 0..count {
                     let article_index = rng.gen_range(0, analysis.articles.len());
-                    roots.push(article_index);
+                    roots.push(article_index.try_into().unwrap());
                 }
             }
             else if matches.is_present("roots") {
@@ -398,7 +399,7 @@ fn main() {
                     .iter()
                     .map(|x| x.len().to_string())
                     .collect();
-                let root_article_name = index_map[root_article_index];
+                let root_article_name = index_map[root_article_index as usize];
 
                 let mut mutex = write_mutex.lock().unwrap();
                 writeln!(mutex, "{}\t{}", root_article_name, steps_strs.join("\t")).unwrap();
@@ -420,12 +421,12 @@ fn main() {
 }
 
 /// Generates a hashmap from article index -> article name
-fn generate_index_lookup_table(article_map: &HashMap<String, usize>) -> Vec<&String> {
+fn generate_index_lookup_table(article_map: &HashMap<String, u32>) -> Vec<&String> {
     unsafe {
         let mut index_lookup_table = Vec::with_capacity(article_map.len());
         index_lookup_table.set_len(article_map.len());
         for (article_name, index) in article_map.iter() {
-            index_lookup_table[*index] = article_name;
+            index_lookup_table[*index as usize] = article_name;
         }
         return index_lookup_table;
     }

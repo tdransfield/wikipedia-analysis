@@ -2,11 +2,12 @@
 use std::collections::HashMap;
 
 use crate::parse::Article;
+use std::convert::TryInto;
 
 /// Implements functions for analysing the parsed wikipedia data.
 pub struct WikipediaAnalysis {
     /// A HashMap of article name -> article index
-    pub article_map: HashMap<String, usize>,
+    pub article_map: HashMap<String, u32>,
     /// An adjacency list representation of the incoming links to each article.
     pub articles: Vec<Article>
 }
@@ -30,13 +31,14 @@ impl WikipediaAnalysis {
     /// A sorted vector of tuples of (article index, link count).
     /// The vector is of length `count` unless `count` exceeds the number of articles.
     ///
-    pub fn get_most_links(&self, count: usize) -> Vec<(usize, usize)> {
+    pub fn get_most_links(&self, count: u32) -> Vec<(u32, u32)> {
         let mut link_counts_map = Vec::new();
         for (_article_name, index) in self.article_map.iter() {
-            link_counts_map.push((*index, self.articles[*index].links.len()));
+            link_counts_map.push(
+                (*index, self.articles[*index as usize].links.len().try_into().unwrap()));
         }
-        link_counts_map.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-        return link_counts_map[0..count].to_vec();
+        link_counts_map.sort_unstable_by(|a:&(u32, u32), b: &(u32, u32)| b.1.cmp(&a.1));
+        return link_counts_map[0..count as usize].to_vec();
     }
 
     /// Gets a histogram of the number of links per page.
@@ -76,15 +78,15 @@ impl WikipediaAnalysis {
     ///
     pub fn get_number_of_steps_between_articles(
         &self,
-        start_article: usize,
-        destination_article: usize) -> Option<usize> {
+        start_article: u32,
+        destination_article: u32) -> Option<u32> {
 
         // Perform a breadth-first-search for destination article from start article
         // BFS guarantees shortest path
         let mut depth = 1;
-        let mut current_article_stack: Vec<usize> = Vec::new();
-        let mut next_article_stack: Vec<usize> = Vec::new();
-        let mut starting_links = self.articles[destination_article].links.clone();
+        let mut current_article_stack: Vec<u32> = Vec::new();
+        let mut next_article_stack: Vec<u32> = Vec::new();
+        let mut starting_links = self.articles[destination_article as usize].links.clone();
         current_article_stack.append(&mut starting_links);
 
         loop {
@@ -92,7 +94,7 @@ impl WikipediaAnalysis {
                 if article_index == start_article {
                     return Some(depth);
                 }
-                next_article_stack.extend(self.articles[article_index].links.iter());
+                next_article_stack.extend(self.articles[article_index as usize].links.iter());
 
             }
             current_article_stack.extend(next_article_stack.iter());
@@ -124,29 +126,29 @@ impl WikipediaAnalysis {
     ///
     pub fn get_path_between_articles(
         &self,
-        start_article: usize,
-        destination_article: usize) -> Option<Vec<usize>> {
+        start_article: u32,
+        destination_article: u32) -> Option<Vec<u32>> {
 
         // Perform a breadth-first-search for destination article from start article
         // BFS guarantees shortest path
-        let mut current_article_stack: Vec<Vec<usize>> = Vec::new();
-        let mut next_article_stack: Vec<Vec<usize>> = Vec::new();
+        let mut current_article_stack: Vec<Vec<u32>> = Vec::new();
+        let mut next_article_stack: Vec<Vec<u32>> = Vec::new();
 
         // Array to check if a node has been visited
         let mut visited: Vec<bool> = Vec::with_capacity(self.articles.len());
         WikipediaAnalysis::vec_initialise_up_to_index(&mut visited, self.articles.len(), false);
 
 
-        for article in self.articles[destination_article].links.iter() {
+        for article in self.articles[destination_article as usize].links.iter() {
             current_article_stack.push(vec!(*article));
-            visited[*article] = true;
+            visited[*article as usize] = true;
         }
 
         loop {
             for article_path in current_article_stack.drain(..) {
                 let current_article = article_path[article_path.len() - 1];
 
-                for next_article in self.articles[current_article].links.iter() {
+                for next_article in self.articles[current_article as usize].links.iter() {
 
                     // First time this is seen is guaranteed to be
                     // the shortest (or equal-shortest) route
@@ -162,11 +164,11 @@ impl WikipediaAnalysis {
                         return Some(path);
                     }
 
-                    if visited[*next_article] == false {
+                    if visited[*next_article as usize] == false {
                         let mut next_path = article_path.clone();
                         next_path.push(*next_article);
                         next_article_stack.push(next_path);
-                        visited[*next_article] = true;
+                        visited[*next_article as usize] = true;
                     }
                 }
             }
@@ -209,14 +211,16 @@ impl WikipediaAnalysis {
     ///
     pub fn get_step_count_groups(
         &self,
-        root_article: usize,
-        max_depth: Option<usize>) -> Vec<Vec<usize>> {
+        root_article: u32,
+        max_depth: Option<u32>) -> Vec<Vec<u32>> {
+
+        let root_article: usize = root_article as usize;
 
         let mut depth = match max_depth {
             Some(depth) => depth,
-            None => self.articles.len()
+            None => self.articles.len().try_into().unwrap()
         };
-        let mut groups: Vec<Vec<usize>> = Vec::new();
+        let mut groups: Vec<Vec<u32>> = Vec::new();
         groups.push( self.articles[root_article].links.clone());
 
         // Array to check if a node has been visited
@@ -228,17 +232,17 @@ impl WikipediaAnalysis {
         // multiple of the same nodes in the to visit group.
         visited[root_article] = true;
         for next_article in self.articles[root_article].links.iter() {
-            visited[*next_article] = true;
+            visited[*next_article as usize] = true;
         }
 
         while depth > 1 {
             let current_article_stack = &groups[groups.len() - 1];
-            let mut next_article_stack: Vec<usize> = Vec::new();
+            let mut next_article_stack: Vec<u32> = Vec::new();
             for current_article in current_article_stack.iter() {
-                for next_article in self.articles[*current_article].links.iter() {
-                    if visited[*next_article] == false {
+                for next_article in self.articles[*current_article as usize].links.iter() {
+                    if visited[*next_article as usize] == false {
                         next_article_stack.push(*next_article);
-                        visited[*next_article] = true;
+                        visited[*next_article as usize] = true;
                     }
                 }
             }

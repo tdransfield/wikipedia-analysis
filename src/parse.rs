@@ -4,6 +4,7 @@ use std::fs::{File, read_dir};
 use std::io::*;
 use std::collections::{HashMap, HashSet};
 use regex::Regex;
+use std::convert::TryInto;
 
 // XML parsing state
 enum ParserState {
@@ -24,11 +25,11 @@ pub struct Article {
     /// Links may be incoming (ie links to current page)
     /// or outgoing (links to other pages from this page)
     /// Depending on the `ParserMode` used when parsing the XML dump.
-    pub links: Vec<usize>
+    pub links: Vec<u32>
 }
 
 /// Approximate number of articles in the 2017_11_03 wikipedia XML dump
-const NUM_ARTICLES: usize = 6_000_000;
+const NUM_ARTICLES: u32 = 6_000_000;
 
 /// Checks if a given title is 'valid' for my definition of valid in relation to this project.
 ///
@@ -222,7 +223,7 @@ fn scan_pages<F>(xml_path: &String, mut valid_page_callback: F) -> ()
 pub fn parse_xml_dump(
     xml_path: &String,
     articles_to_ignore: Option<HashSet<String>>,
-    mode: ParserMode) -> (HashMap<String, usize>, Vec<Article>) {
+    mode: ParserMode) -> (HashMap<String, u32>, Vec<Article>) {
 
     // Compile regexes once for efficiency
     let link_regex = Regex::new(r"[^=]\[\[([^\[\]]+)\]\]").unwrap();
@@ -231,10 +232,10 @@ pub fn parse_xml_dump(
     let see_also_regex = Regex::new(r"\{\{see also\|([^\{\}]+?)\}\}").unwrap();
 
     // Maps name of article => index of Article struct in articles
-    let mut article_map: HashMap<String, usize> = HashMap::with_capacity(NUM_ARTICLES);
+    let mut article_map: HashMap<String, u32> = HashMap::with_capacity(NUM_ARTICLES as usize);
     // Maps name of article to name of article to redirect to
-    let mut redirect_to: HashMap<String, String> = HashMap::with_capacity(NUM_ARTICLES);
-    let mut articles: Vec<Article> = Vec::with_capacity(NUM_ARTICLES);
+    let mut redirect_to: HashMap<String, String> = HashMap::with_capacity(NUM_ARTICLES as usize);
+    let mut articles: Vec<Article> = Vec::with_capacity(NUM_ARTICLES as usize);
 
     let get_valid_pages = | article_name: String, body: String | -> () {
 
@@ -301,7 +302,7 @@ pub fn parse_xml_dump(
                 None => {
                     article_map.insert(
                         article_name,
-                        article_map.len()
+                        article_map.len().try_into().unwrap()
                     );
                     articles.push(Article {
                         links: Vec::new()
@@ -385,10 +386,10 @@ pub fn parse_xml_dump(
                 Some(dest_article_index) => {
                     match &mode {
                         ParserMode::IncomingLinks => {
-                            articles[*dest_article_index].links.push(*source_article_index);
+                            articles[*dest_article_index as usize].links.push(*source_article_index);
                         },
                         ParserMode::OutgoingLinks => {
-                            articles[*source_article_index].links.push(*dest_article_index);
+                            articles[*source_article_index as usize].links.push(*dest_article_index);
                         }
                     }
                 },
@@ -414,19 +415,19 @@ pub fn parse_xml_dump(
 ///
 pub fn write_to_tsv(
     output_path: &String,
-    article_map: &mut HashMap<String, usize>,
+    article_map: &mut HashMap<String, u32>,
     articles: &mut Vec<Article>) -> () {
 
     assert_eq!(article_map.len(), articles.len());
 
     // Convert hashmap to vec in correct order based on index
-    let mut article_titles: Vec<Option<String>> = Vec::with_capacity(NUM_ARTICLES);
+    let mut article_titles: Vec<Option<String>> = Vec::with_capacity(NUM_ARTICLES as usize);
     for _ in 0..article_map.len() {
         article_titles.push(None);
     }
 
     for (title, index) in article_map.iter() {
-        article_titles[*index] = Some(title.clone());
+        article_titles[*index as usize] = Some(title.clone());
     }
 
     let mut fout_links_graph = File::create(output_path).unwrap();
@@ -468,12 +469,12 @@ pub fn write_to_tsv(
 /// # Panics
 /// May panic if the TSV file becomes corrupted
 ///
-pub fn load_from_tsv(tsv_path: &String) -> (HashMap<String, usize>, Vec<Article>) {
+pub fn load_from_tsv(tsv_path: &String) -> (HashMap<String, u32>, Vec<Article>) {
     let file = File::open(tsv_path).unwrap();
     let reader = BufReader::new(file);
 
-    let mut lookup_table: HashMap<String, usize> = HashMap::with_capacity(NUM_ARTICLES);
-    let mut adjacency_list: Vec<Article> = Vec::with_capacity(NUM_ARTICLES);
+    let mut lookup_table: HashMap<String, u32> = HashMap::with_capacity(NUM_ARTICLES as usize);
+    let mut adjacency_list: Vec<Article> = Vec::with_capacity(NUM_ARTICLES as usize);
 
     for line in reader.lines() {
         let line = line.unwrap();
@@ -482,7 +483,7 @@ pub fn load_from_tsv(tsv_path: &String) -> (HashMap<String, usize>, Vec<Article>
         // TSV has at least 2 fields:
         // Index \t Article name \t link indices
         if fields.len() >= 2 {
-            let article_index = fields[0].parse::<usize>().unwrap();
+            let article_index = fields[0].parse::<u32>().unwrap();
             let article_title = fields[1].to_string();
 
             // There should not be duplicate articles in the TSV
@@ -491,12 +492,13 @@ pub fn load_from_tsv(tsv_path: &String) -> (HashMap<String, usize>, Vec<Article>
             // Index should match line number (0-indexed)
             // If they do not match then we have skipped data
             // and the adjacency list indexes will be wrong
-            assert_eq!(adjacency_list.len(), article_index);
+            assert_eq!(adjacency_list.len(), article_index as usize);
 
+            // Collecting sets the vector capacity to the same size as the number of items.
             let links = match fields[2].len() > 0 {
                 true => fields[2..]
                         .iter()
-                        .map(|x| x.parse::<usize>().unwrap())
+                        .map(|x| x.parse::<u32>().unwrap())
                         .collect(),
                 false => Vec::new()
             };
@@ -522,10 +524,10 @@ pub fn load_from_tsv(tsv_path: &String) -> (HashMap<String, usize>, Vec<Article>
 /// * A HashMap of article name -> article index, mapping redirected articles to indices
 ///
 fn resolve_redirects(
-    article_map: &HashMap<String, usize>,
-    redirects: &mut HashMap<String, String>) -> HashMap<String, usize> {
+    article_map: &HashMap<String, u32>,
+    redirects: &mut HashMap<String, String>) -> HashMap<String, u32> {
 
-    let mut redirects_map: HashMap<String, usize> = HashMap::with_capacity(NUM_ARTICLES);
+    let mut redirects_map: HashMap<String, u32> = HashMap::with_capacity(NUM_ARTICLES as usize);
 
     for (curr_article_name, redirected_to_article_name) in redirects.iter() {
         let mut current_redirect_article_name = redirected_to_article_name;
