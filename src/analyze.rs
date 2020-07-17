@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use crate::parse::Article;
 use std::convert::TryInto;
+use std::mem;
 
 /// Implements functions for analysing the parsed wikipedia data.
 pub struct WikipediaAnalysis {
@@ -134,14 +135,15 @@ impl WikipediaAnalysis {
         let mut current_article_stack: Vec<Vec<u32>> = Vec::new();
         let mut next_article_stack: Vec<Vec<u32>> = Vec::new();
 
-        // Array to check if a node has been visited
-        let mut visited: Vec<bool> = Vec::with_capacity(self.articles.len());
-        WikipediaAnalysis::vec_initialise_up_to_index(&mut visited, self.articles.len(), false);
-
+        // See `get_step_count_groups()` for how this works
+        const BITS_PER_BYTE: usize = 8;
+        const BITMASK: usize = BITS_PER_BYTE * mem::size_of::<usize>() - 1;
+        const LOG2_BITS_PER_USIZE: usize = BITMASK.count_ones() as usize;
+        let mut visited: Vec<usize> = vec![0; (self.articles.len() >> LOG2_BITS_PER_USIZE as usize) + 1];
 
         for article in self.articles[destination_article as usize].links.iter() {
             current_article_stack.push(vec!(*article));
-            visited[*article as usize] = true;
+            visited[*article as usize >> LOG2_BITS_PER_USIZE] |= 1 << (*article as usize & BITMASK);
         }
 
         loop {
@@ -164,11 +166,11 @@ impl WikipediaAnalysis {
                         return Some(path);
                     }
 
-                    if visited[*next_article as usize] == false {
+                    if (visited[*next_article as usize >> LOG2_BITS_PER_USIZE] & 1 << (*next_article as usize & BITMASK)) == 0 {
                         let mut next_path = article_path.clone();
                         next_path.push(*next_article);
                         next_article_stack.push(next_path);
-                        visited[*next_article as usize] = true;
+                        visited[*next_article as usize >> LOG2_BITS_PER_USIZE] |= 1 << (*next_article as usize & BITMASK);
                     }
                 }
             }
@@ -214,7 +216,7 @@ impl WikipediaAnalysis {
         root_article: u32,
         max_depth: Option<u32>) -> Vec<Vec<u32>> {
 
-        let root_article: usize = root_article as usize;
+        let root_article = root_article as usize;
 
         let mut depth = match max_depth {
             Some(depth) => depth,
@@ -224,15 +226,22 @@ impl WikipediaAnalysis {
         groups.push( self.articles[root_article].links.clone());
 
         // Array to check if a node has been visited
-        let mut visited: Vec<bool> = Vec::with_capacity(self.articles.len());
-        WikipediaAnalysis::vec_initialise_up_to_index(&mut visited, self.articles.len(), false);
+        // As this is a bitfield we are going to pack the bits as tightly as possible
+        // and use usize as the native size for accessing it (assumed fastest size for basic integer
+        // operations and memory alignment on the architecture)
+        // This helps to reduce cache pressure as this is a fairly hot area of memory
+        const BITS_PER_BYTE: usize = 8;
+        const BITMASK: usize = BITS_PER_BYTE * mem::size_of::<usize>() - 1;
+        const LOG2_BITS_PER_USIZE: usize = BITMASK.count_ones() as usize;
+
+        let mut visited: Vec<usize> = vec![0; (self.articles.len() >> LOG2_BITS_PER_USIZE as usize) + 1];
 
         // Initialise visited elements
         // Visited is set before expanding a node to avoid having
         // multiple of the same nodes in the to visit group.
-        visited[root_article] = true;
+        visited[root_article >> LOG2_BITS_PER_USIZE] |= 1 << (root_article & BITMASK);
         for next_article in self.articles[root_article].links.iter() {
-            visited[*next_article as usize] = true;
+            visited[*next_article as usize >> LOG2_BITS_PER_USIZE] |= 1 << (*next_article as usize & BITMASK);
         }
 
         while depth > 1 {
@@ -240,9 +249,11 @@ impl WikipediaAnalysis {
             let mut next_article_stack: Vec<u32> = Vec::new();
             for current_article in current_article_stack.iter() {
                 for next_article in self.articles[*current_article as usize].links.iter() {
-                    if visited[*next_article as usize] == false {
+                    // Check if article has been visited
+                    if (visited[*next_article as usize >> LOG2_BITS_PER_USIZE] & 1 << (*next_article as usize & BITMASK)) == 0 {
                         next_article_stack.push(*next_article);
-                        visited[*next_article as usize] = true;
+                        // Mark article visited
+                        visited[*next_article as usize >> LOG2_BITS_PER_USIZE] |= 1 << (*next_article as usize & BITMASK);
                     }
                 }
             }
